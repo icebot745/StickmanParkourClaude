@@ -3,13 +3,22 @@
 const Game = {
     canvas: null,
     ctx: null,
-    state: 'start', // start, playing, dead
+    state: 'start', // start, playing, dead, complete, gameover
     cameraX: 0,
     blocks: [],
     player: null,
     lastTime: 0,
     deadTimer: 0,
     lastCheckpointBlock: null, // the block the player last touched a checkpoint on
+    checkpointFlashTimer: 0,
+    timeLeft: 600,   // 10-minute countdown in seconds
+    finalScore: 0,   // seconds remaining when level is completed
+    // Screen shake
+    screenShakeTimer: 0,
+    screenShakeMag: 0,
+
+    // Timer beep tracking
+    lastTimerBeep: -1,
 
     init() {
         this.canvas = document.getElementById('gameCanvas');
@@ -32,6 +41,13 @@ const Game = {
     setupLevel() {
         this.blocks = Level.generate(this.canvas.height);
         this.lastCheckpointBlock = null;
+        this.checkpointFlashTimer = 0;
+        this.timeLeft = 600;
+        this.finalScore = 0;
+        this.screenShakeTimer = 0;
+        this.screenShakeMag = 0;
+        this.lastTimerBeep = -1;
+        Particles.clear();
 
         // Player starts on first block
         const firstBlock = this.blocks[0];
@@ -45,6 +61,13 @@ const Game = {
         this.state = 'playing';
         this.setupLevel();
         this.cameraX = 0;
+        this.timeLeft = 600;
+        this.finalScore = 0;
+    },
+
+    addScreenShake(mag, dur) {
+        this.screenShakeMag   = Math.max(this.screenShakeMag, mag);
+        this.screenShakeTimer = Math.max(this.screenShakeTimer, dur);
     },
 
     loop(timestamp) {
@@ -66,6 +89,27 @@ const Game = {
             return;
         }
 
+        // Particles and screen shake run in all non-start states
+        Particles.update(dt);
+        if (this.screenShakeTimer > 0) {
+            this.screenShakeTimer -= dt;
+            if (this.screenShakeTimer <= 0) this.screenShakeMag = 0;
+        }
+
+        if (this.state === 'complete') {
+            if (Input.jump || Input.wasPressed('Enter') || Input.wasPressed('KeyR')) {
+                this.startGame();
+            }
+            return;
+        }
+
+        if (this.state === 'gameover') {
+            if (Input.jump || Input.wasPressed('Enter')) {
+                this.startGame();
+            }
+            return;
+        }
+
         if (this.state === 'dead') {
             this.deadTimer -= dt;
             if (this.deadTimer <= 0) {
@@ -75,16 +119,63 @@ const Game = {
             return;
         }
 
+        // Decrement checkpoint flash timer
+        this.checkpointFlashTimer = Math.max(0, this.checkpointFlashTimer - dt);
+
+        // Countdown timer
+        this.timeLeft -= dt;
+        if (this.timeLeft <= 0) {
+            this.timeLeft = 0;
+            this.state = 'gameover';
+            Sound.death();
+            return;
+        }
+
+        // Warning beep every second when under 30 s
+        if (this.timeLeft < 30) {
+            const beepAt = Math.ceil(this.timeLeft);
+            if (beepAt !== this.lastTimerBeep) {
+                this.lastTimerBeep = beepAt;
+                Sound.timerWarning();
+            }
+        }
+
         // Playing state
         const fell = this.player.update(dt, this.blocks);
+
+        // Update block states
+        for (const block of this.blocks) {
+            block.update(dt);
+        }
 
         if (fell) {
             this.state = 'dead';
             this.deadTimer = 0.8;
+            Sound.death();
+            Particles.death(this.player.x + this.player.width / 2, this.player.y + this.player.height / 2);
+            this.addScreenShake(10, 0.4);
+            return;
         }
 
         // Check checkpoint touches
         this.checkCheckpoints();
+
+        // Win detection: player is on ground and overlaps the last block's center-to-right half
+        const lastBlock = this.blocks[this.blocks.length - 1];
+        if (lastBlock && this.player.onGround) {
+            const blockCenterX = lastBlock.x + lastBlock.width / 2;
+            const playerOverlapsRight = (
+                this.player.x + this.player.width > blockCenterX &&
+                this.player.x < lastBlock.x + lastBlock.width &&
+                Math.abs((this.player.y + this.player.height) - lastBlock.y) < 4
+            );
+            if (playerOverlapsRight) {
+                this.finalScore = Math.floor(this.timeLeft);
+                this.state = 'complete';
+                Sound.complete();
+                Particles.complete(this.player.x, this.canvas.height / 2, this.canvas.width);
+            }
+        }
 
         // Camera follows player horizontally with lookahead
         const targetCameraX = this.player.x - this.canvas.width * 0.35;
@@ -108,12 +199,19 @@ const Game = {
             if (onBlock) {
                 this.lastCheckpointBlock = block;
                 this.player.setSpawn(block.x + 20, block.y - 40);
+                block.activatedTime = performance.now();
+                this.checkpointFlashTimer = 1.5;
+                Sound.checkpoint();
+                Particles.checkpoint(block.x + block.width / 2, block.y);
             }
         }
     },
 
     // Returns the highest block index the player has reached
     getPlayerProgress() {
+        if (this.state !== 'playing' && this.state !== 'dead' && this.state !== 'complete' && this.state !== 'gameover') {
+            return 1;
+        }
         let best = 0;
         for (const block of this.blocks) {
             if (!block.active) continue;
@@ -155,6 +253,12 @@ const Game = {
             return;
         }
 
+        // --- World layer (with screen shake) ---
+        const shakeX = this.screenShakeTimer > 0 ? (Math.random() - 0.5) * this.screenShakeMag * 2 : 0;
+        const shakeY = this.screenShakeTimer > 0 ? (Math.random() - 0.5) * this.screenShakeMag * 2 : 0;
+        ctx.save();
+        ctx.translate(shakeX, shakeY);
+
         // Draw blocks
         for (const block of this.blocks) {
             block.draw(ctx, this.cameraX);
@@ -163,10 +267,32 @@ const Game = {
         // Draw player
         if (this.state !== 'dead') {
             this.player.draw(ctx, this.cameraX);
-        } else {
-            // Death flash
+        }
+
+        // Draw particles (world-space, behind UI)
+        Particles.draw(ctx, this.cameraX);
+
+        ctx.restore();
+
+        // Death flash overlay (no shake — keeps UI readable)
+        if (this.state === 'dead') {
             ctx.fillStyle = `rgba(255, 80, 50, ${this.deadTimer * 0.5})`;
             ctx.fillRect(0, 0, w, h);
+        }
+
+        // Checkpoint banner (while playing)
+        if (this.checkpointFlashTimer > 0 && this.state === 'playing') {
+            this.drawCheckpointBanner(ctx, w, h);
+        }
+
+        // Complete screen
+        if (this.state === 'complete') {
+            this.drawCompleteScreen(ctx, w, h);
+        }
+
+        // Game over screen
+        if (this.state === 'gameover') {
+            this.drawGameOverScreen(ctx, w, h);
         }
 
         // HUD
@@ -211,7 +337,7 @@ const Game = {
 
         ctx.font = '20px Arial, sans-serif';
         ctx.fillStyle = 'rgba(255,255,255,0.8)';
-        ctx.fillText('Navigate 200 floating blocks. Don\'t fall into the void.', w / 2, h * 0.42);
+        ctx.fillText('Navigate 100 blocks in 10 minutes. Don\'t fall into the void.', w / 2, h * 0.42);
 
         const pulse = 0.6 + Math.sin(performance.now() * 0.004) * 0.4;
         ctx.fillStyle = `rgba(255, 255, 255, ${pulse})`;
@@ -220,7 +346,148 @@ const Game = {
 
         ctx.font = '16px Arial, sans-serif';
         ctx.fillStyle = 'rgba(255,255,255,0.6)';
-        ctx.fillText('Arrow Keys / WASD to move  •  UP / SPACE to jump', w / 2, h * 0.65);
+        ctx.fillText('Move: Arrow Keys / WASD  \u2022  Jump: UP / SPACE  \u2022  Roll: DOWN (10s speed boost)', w / 2, h * 0.65);
+
+        ctx.shadowBlur = 0;
+        ctx.textAlign = 'left';
+    },
+
+    drawCompleteScreen(ctx, w, h) {
+        // Semi-transparent dark overlay
+        ctx.fillStyle = 'rgba(0, 20, 40, 0.75)';
+        ctx.fillRect(0, 0, w, h);
+
+        ctx.textAlign = 'center';
+        ctx.shadowColor = 'rgba(0,0,0,0.5)';
+        ctx.shadowBlur = 12;
+
+        // Gold title
+        ctx.fillStyle = '#FFD700';
+        ctx.font = 'bold 56px Arial, sans-serif';
+        ctx.fillText('YOU MADE IT!', w / 2, h * 0.35);
+
+        // Subtitle
+        ctx.fillStyle = '#FFFFFF';
+        ctx.font = '22px Arial, sans-serif';
+        ctx.fillText('You navigated all 100 blocks!', w / 2, h * 0.44);
+
+        // Checkpoints stat
+        const checkpointsReached = this.lastCheckpointBlock
+            ? Level.CHECKPOINT_INDICES.filter(idx => idx <= this.lastCheckpointBlock.blockIndex).length
+            : 0;
+        ctx.fillStyle = '#FF8A65';
+        ctx.font = '20px Arial, sans-serif';
+        ctx.fillText(`Checkpoints hit: ${checkpointsReached} / ${Level.CHECKPOINT_INDICES.length}`, w / 2, h * 0.52);
+
+        // Score display
+        ctx.fillStyle = '#FFD700';
+        ctx.font = 'bold 28px Arial, sans-serif';
+        ctx.fillText(`SCORE: ${this.finalScore} seconds`, w / 2, h * 0.58);
+
+        // Score descriptor
+        ctx.fillStyle = 'rgba(255,255,255,0.55)';
+        ctx.font = '15px Arial, sans-serif';
+        ctx.fillText(`${this.finalScore} seconds remaining out of 600`, w / 2, h * 0.63);
+
+        // Pulsing play again prompt
+        const pulse = 0.6 + Math.sin(performance.now() * 0.004) * 0.4;
+        ctx.fillStyle = `rgba(255, 255, 255, ${pulse})`;
+        ctx.font = 'bold 24px Arial, sans-serif';
+        ctx.fillText('Press SPACE or ENTER to Play Again', w / 2, h * 0.72);
+
+        ctx.shadowBlur = 0;
+        ctx.textAlign = 'left';
+    },
+
+    drawCheckpointBanner(ctx, w, h) {
+        // Compute which checkpoint number was just hit
+        let checkpointNum = 0;
+        if (this.lastCheckpointBlock) {
+            checkpointNum = Level.CHECKPOINT_INDICES.filter(
+                idx => idx <= this.lastCheckpointBlock.blockIndex
+            ).length;
+        }
+
+        // Alpha fades out when timer < 0.5
+        const alpha = this.checkpointFlashTimer < 0.5
+            ? this.checkpointFlashTimer / 0.5
+            : 1.0;
+
+        const boxW = 300;
+        const boxH = 64;
+        const boxX = (w - boxW) / 2;
+        const boxY = h * 0.2;
+
+        ctx.save();
+        ctx.globalAlpha = alpha;
+
+        // Dark orange translucent box
+        ctx.fillStyle = 'rgba(180, 60, 10, 0.78)';
+        ctx.beginPath();
+        ctx.roundRect(boxX, boxY, boxW, boxH, 10);
+        ctx.fill();
+
+        // Border
+        ctx.strokeStyle = 'rgba(255, 180, 80, 0.7)';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        ctx.textAlign = 'center';
+        ctx.shadowColor = 'rgba(0,0,0,0.5)';
+        ctx.shadowBlur = 6;
+
+        // Main text
+        ctx.fillStyle = '#FFFFFF';
+        ctx.font = 'bold 20px Arial, sans-serif';
+        ctx.fillText(`\u2713 CHECKPOINT ${checkpointNum} / ${Level.CHECKPOINT_INDICES.length}`, w / 2, boxY + 26);
+
+        // Sub text
+        ctx.fillStyle = 'rgba(255,220,180,0.9)';
+        ctx.font = '14px Arial, sans-serif';
+        ctx.fillText('Respawn point saved', w / 2, boxY + 48);
+
+        ctx.shadowBlur = 0;
+        ctx.textAlign = 'left';
+        ctx.restore();
+    },
+
+    drawGameOverScreen(ctx, w, h) {
+        // Dark red overlay
+        ctx.fillStyle = 'rgba(20, 0, 0, 0.82)';
+        ctx.fillRect(0, 0, w, h);
+
+        ctx.textAlign = 'center';
+        ctx.shadowColor = '#FF1744';
+        ctx.shadowBlur = 24;
+
+        // Title
+        ctx.fillStyle = '#FF5252';
+        ctx.font = 'bold 62px Arial, sans-serif';
+        ctx.fillText("TIME'S UP!", w / 2, h * 0.34);
+
+        ctx.shadowBlur = 0;
+
+        // Subtitle
+        ctx.fillStyle = 'rgba(255,255,255,0.85)';
+        ctx.font = '22px Arial, sans-serif';
+        ctx.fillText('You ran out of time!', w / 2, h * 0.44);
+
+        // Progress reached
+        const progress = this.getPlayerProgress();
+        ctx.fillStyle = '#FF8A65';
+        ctx.font = '18px Arial, sans-serif';
+        ctx.fillText(`Reached block ${progress} / ${Level.TOTAL_BLOCKS}`, w / 2, h * 0.52);
+
+        // Tip about rolling
+        ctx.fillStyle = 'rgba(0, 229, 255, 0.75)';
+        ctx.font = '15px Arial, sans-serif';
+        ctx.fillText('Tip: Press DOWN to activate a 10s speed boost!', w / 2, h * 0.60);
+
+        // Restart prompt (pulsing)
+        const pulse = 0.6 + Math.sin(performance.now() * 0.004) * 0.4;
+        ctx.fillStyle = `rgba(255, 255, 255, ${pulse})`;
+        ctx.font = 'bold 24px Arial, sans-serif';
+        ctx.fillText('Press SPACE or ENTER to Try Again', w / 2, h * 0.70);
 
         ctx.shadowBlur = 0;
         ctx.textAlign = 'left';
@@ -234,8 +501,10 @@ const Game = {
         ctx.shadowBlur = 0;
         ctx.textAlign = 'left';
 
-        // Progress: Block X / 200
-        const progress = this.state === 'playing' ? this.getPlayerProgress() : 1;
+        // Progress: Block X / total
+        const progress = (this.state === 'playing' || this.state === 'dead' || this.state === 'complete' || this.state === 'gameover')
+            ? this.getPlayerProgress()
+            : 1;
         const total = Level.TOTAL_BLOCKS;
 
         ctx.fillStyle = '#FFF';
@@ -254,13 +523,34 @@ const Game = {
         ctx.roundRect(barX, barY, barW, barH, 5);
         ctx.fill();
 
-        ctx.fillStyle = '#4CAF50';
+        // Gold bar when complete, green otherwise
+        ctx.fillStyle = this.state === 'complete' ? '#FFD700' : '#4CAF50';
         ctx.beginPath();
         ctx.roundRect(barX, barY, barW * fill, barH, 5);
         ctx.fill();
 
+        // Timer — center of bar
+        const mins = Math.floor(this.timeLeft / 60);
+        const secs = Math.floor(this.timeLeft % 60);
+        const timeStr = `${mins}:${secs.toString().padStart(2, '0')}`;
+
+        let timerColor = '#69F0AE';          // green (> 2 min)
+        if (this.timeLeft < 120) timerColor = '#FFD740'; // yellow
+        if (this.timeLeft < 30)  timerColor = '#FF5252'; // red
+
+        // Pulse red when < 30s
+        let timerAlpha = 1;
+        if (this.timeLeft < 30) timerAlpha = 0.6 + Math.sin(performance.now() * 0.012) * 0.4;
+
+        ctx.save();
+        ctx.globalAlpha = timerAlpha;
+        ctx.fillStyle = timerColor;
+        ctx.font = 'bold 22px Arial, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(timeStr, w / 2, 30);
+        ctx.restore();
+
         // Checkpoint indicator on the right
-        const checkpointNums = [1, 2, 3, 4];
         const checkpointBlocks = Level.CHECKPOINT_INDICES;
         ctx.font = '13px Arial, sans-serif';
         ctx.textAlign = 'right';
@@ -272,14 +562,19 @@ const Game = {
             ).length;
         }
 
-        ctx.fillStyle = 'rgba(255,255,255,0.5)';
-        ctx.fillText('Checkpoints:', w - 110, 22);
+        const numCPs = Level.CHECKPOINT_INDICES.length;
+        const dotR = 5;
+        const dotSpacing = 14;
+        const dotsWidth = (numCPs - 1) * dotSpacing;
 
-        for (let i = 0; i < 4; i++) {
-            const cx = w - 95 + i * 22;
-            const cy = 22;
+        ctx.fillStyle = 'rgba(255,255,255,0.5)';
+        ctx.fillText('Checkpoints:', w - dotsWidth - 24, 22);
+
+        for (let i = 0; i < numCPs; i++) {
+            const cx = w - dotsWidth - 10 + i * dotSpacing;
+            const cy = 17;
             ctx.beginPath();
-            ctx.arc(cx, cy - 5, 7, 0, Math.PI * 2);
+            ctx.arc(cx, cy, dotR, 0, Math.PI * 2);
             ctx.fillStyle = i < checkpointsReached ? '#FF5722' : 'rgba(255,255,255,0.2)';
             ctx.fill();
             ctx.strokeStyle = i < checkpointsReached ? '#FF8A65' : 'rgba(255,255,255,0.3)';
@@ -288,6 +583,16 @@ const Game = {
         }
 
         ctx.textAlign = 'left';
+
+        // Roll indicator below the timer bar (y=60)
+        if (Game.player && Game.player.rollTimer > 0) {
+            ctx.save();
+            ctx.fillStyle = '#00E5FF';
+            ctx.font = 'bold 13px Arial, sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText(`\u26A1 ROLL ${Math.ceil(Game.player.rollTimer)}s`, w / 2, 44 + 16);
+            ctx.restore();
+        }
 
         // Death message
         if (this.state === 'dead') {
