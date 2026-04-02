@@ -83,6 +83,14 @@ const Particles = {
             -Math.PI, 0, -90);
     },
 
+    // Bright green upward burst on bounce pad
+    bounce(x, y) {
+        this._burst(x, y, 18,
+            ['#76FF03', '#CCFF90', '#69F0AE', '#B9F6CA'],
+            80, 220, 0.55, 2, 4.5, 200,
+            -Math.PI, 0, -120);
+    },
+
     // Dust puff on landing
     land(x, y) {
         this._burst(x, y, 10,

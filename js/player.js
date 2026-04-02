@@ -29,20 +29,31 @@ class Player {
         this.knockbackTimer = 0;
 
         // Roll state
-        this.rollTimer = 0;  // seconds remaining on roll boost
+        this.rollTimer    = 0;  // seconds remaining on active roll
+        this.rollCooldown = 0;  // seconds remaining on cooldown after roll ends
     }
 
     update(dt, blocks) {
         // Decrement knockback timer
         if (this.knockbackTimer > 0) this.knockbackTimer -= dt;
 
-        // Roll activation
-        if (Input.down && this.onGround && this.rollTimer <= 0) {
+        // Roll cooldown countdown
+        if (this.rollCooldown > 0) { this.rollCooldown -= dt; if (this.rollCooldown < 0) this.rollCooldown = 0; }
+
+        // Roll activation (only when not rolling and not on cooldown)
+        if (Input.down && this.onGround && this.rollTimer <= 0 && this.rollCooldown <= 0) {
             this.rollTimer = 10;
             Sound.roll();
         }
-        if (this.rollTimer > 0) this.rollTimer -= dt;
-        if (this.rollTimer < 0) this.rollTimer = 0;
+
+        // Roll duration countdown — when it expires start the cooldown
+        if (this.rollTimer > 0) {
+            this.rollTimer -= dt;
+            if (this.rollTimer <= 0) {
+                this.rollTimer = 0;
+                this.rollCooldown = 20;
+            }
+        }
 
         // Reset standing block each frame before collisions
         this.standingBlock = null;
@@ -190,6 +201,16 @@ class Player {
                         continue;
                     }
 
+                    if (block.type === BlockType.BOUNCE) {
+                        // Bounce pad: launch straight up with high force
+                        this.y = block.y - this.height;
+                        this.vy = -950;
+                        this.onGround = false;
+                        Sound.slimeBounce();
+                        Particles.bounce(this.x + this.width / 2, block.y);
+                        continue;
+                    }
+
                     // Normal landing (also handles SLIME and DISAPPEARING)
                     this.y = block.y - this.height;
                     this.vy = 0;
@@ -228,6 +249,7 @@ class Player {
         this.knockbackTimer = 0;
         this.standingBlock = null;
         this.rollTimer = 0;
+        this.rollCooldown = 0;
     }
 
     setSpawn(x, y) {

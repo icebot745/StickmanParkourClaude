@@ -585,13 +585,23 @@ const Game = {
         ctx.textAlign = 'left';
 
         // Roll indicator below the timer bar (y=60)
-        if (Game.player && Game.player.rollTimer > 0) {
-            ctx.save();
-            ctx.fillStyle = '#00E5FF';
-            ctx.font = 'bold 13px Arial, sans-serif';
-            ctx.textAlign = 'center';
-            ctx.fillText(`\u26A1 ROLL ${Math.ceil(Game.player.rollTimer)}s`, w / 2, 44 + 16);
-            ctx.restore();
+        if (Game.player) {
+            const p = Game.player;
+            if (p.rollTimer > 0) {
+                ctx.save();
+                ctx.fillStyle = '#00E5FF';
+                ctx.font = 'bold 13px Arial, sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText(`\u26A1 ROLL ${Math.ceil(p.rollTimer)}s`, w / 2, 44 + 16);
+                ctx.restore();
+            } else if (p.rollCooldown > 0) {
+                ctx.save();
+                ctx.fillStyle = 'rgba(0,180,210,0.65)';
+                ctx.font = 'bold 13px Arial, sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText(`ROLL COOLDOWN ${Math.ceil(p.rollCooldown)}s`, w / 2, 44 + 16);
+                ctx.restore();
+            }
         }
 
         // Death message

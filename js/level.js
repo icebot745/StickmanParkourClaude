@@ -38,6 +38,7 @@ const Level = {
         for (let i = 0; i < 15; i++) typePool.push(BlockType.CONVEYOR);
         for (let i = 0; i < 15; i++) typePool.push(BlockType.MAGMA);
         for (let i = 0; i < 10; i++) typePool.push(BlockType.MOVING);
+        for (let i = 0; i < 10; i++) typePool.push(BlockType.BOUNCE);
         while (typePool.length < nonForced.length) typePool.push(BlockType.DIRT);
 
         // Fisher-Yates shuffle

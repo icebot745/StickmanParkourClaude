@@ -7,6 +7,7 @@ const BlockType = {
     CONVEYOR: 'conveyor',
     MAGMA: 'magma',
     MOVING: 'moving',
+    BOUNCE: 'bounce',
 };
 
 class Block {
@@ -23,7 +24,7 @@ class Block {
         this.activatedTime = null;
 
         // DISAPPEARING state
-        this.blockState = 'solid'; // 'solid' | 'warning' | 'gone'
+        this.blockState = 'solid'; // 'solid' | 'warning' | 'gone' | 'reappearing'
         this.disappearTimer = 0;
         this.reappearTimer = 0;
 
@@ -47,13 +48,21 @@ class Block {
                 if (this.disappearTimer <= 0) {
                     this.blockState = 'gone';
                     this.active = false;
-                    this.reappearTimer = 5;
+                    this.reappearTimer = 4;
                 }
             } else if (this.blockState === 'gone') {
                 this.reappearTimer -= dt;
                 if (this.reappearTimer <= 0) {
-                    this.blockState = 'solid';
+                    // Start fade-in animation; make solid so player can land on it
+                    this.blockState = 'reappearing';
+                    this.reappearTimer = 0.7;
                     this.active = true;
+                }
+            } else if (this.blockState === 'reappearing') {
+                this.reappearTimer -= dt;
+                if (this.reappearTimer <= 0) {
+                    this.blockState = 'solid';
+                    this.reappearTimer = 0;
                 }
             }
         }
@@ -79,6 +88,7 @@ class Block {
     draw(ctx, cameraX) {
         // For DISAPPEARING blocks in 'gone' state, skip drawing entirely
         if (this.type === BlockType.DISAPPEARING && this.blockState === 'gone') return;
+        if (!this.active && this.type === BlockType.DISAPPEARING) return;
 
         if (!this.active) return;
 
@@ -105,6 +115,9 @@ class Block {
             case BlockType.MOVING:
                 this.drawMoving(ctx, screenX, screenY);
                 break;
+            case BlockType.BOUNCE:
+                this.drawBounce(ctx, screenX, screenY);
+                break;
             default:
                 this.drawDirt(ctx, screenX, screenY);
                 break;
@@ -130,6 +143,12 @@ class Block {
             if (this.disappearTimer < 0.5) {
                 x += Math.sin(performance.now() * 0.08) * 4;
             }
+        }
+
+        // Reappearing state: fade in from transparent, pulse glow
+        if (this.blockState === 'reappearing') {
+            const progress = 1 - (this.reappearTimer / 0.7); // 0 → 1 as block fades in
+            ctx.globalAlpha = progress;
         }
 
         // Yellow-gold body
@@ -437,6 +456,43 @@ class Block {
         ctx.shadowColor = 'rgba(0,0,0,0.7)';
         ctx.shadowBlur = 4;
         ctx.fillText('FINISH', centerX + (cols * sqSize) / 2, poleTopY + rows * sqSize + 12);
+        ctx.restore();
+    }
+
+    drawBounce(ctx, x, y) {
+        const now = performance.now() * 0.005;
+
+        // Bright lime-green body
+        ctx.fillStyle = '#76FF03';
+        ctx.fillRect(x, y + 8, this.width, this.height - 8);
+
+        // Darker bottom edge
+        ctx.fillStyle = '#33691E';
+        ctx.fillRect(x, y + this.height - 4, this.width, 4);
+
+        // Animated bouncy top surface (larger amplitude than regular slime)
+        ctx.fillStyle = '#CCFF90';
+        ctx.beginPath();
+        ctx.moveTo(x, y + 8);
+        for (let px = 0; px <= this.width; px += 2) {
+            const waveY = y + 8 - Math.abs(Math.sin(now + px * 0.22)) * 10;
+            ctx.lineTo(x + px, waveY);
+        }
+        ctx.lineTo(x + this.width, y + 8);
+        ctx.lineTo(x + this.width, y);
+        ctx.lineTo(x, y);
+        ctx.closePath();
+        ctx.fill();
+
+        // Pulsing upward arrow to hint behaviour
+        const pulse = 0.55 + Math.abs(Math.sin(now * 0.9)) * 0.45;
+        ctx.save();
+        ctx.globalAlpha = pulse;
+        ctx.fillStyle = '#1B5E20';
+        ctx.font = `bold ${Math.min(14, this.width * 0.28)}px Arial, sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('↑', x + this.width / 2, y + this.height / 2 + 3);
         ctx.restore();
     }
 
