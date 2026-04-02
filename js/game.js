@@ -9,6 +9,7 @@ const Game = {
     player: null,
     lastTime: 0,
     deadTimer: 0,
+    lastCheckpointBlock: null, // the block the player last touched a checkpoint on
 
     init() {
         this.canvas = document.getElementById('gameCanvas');
@@ -29,24 +30,8 @@ const Game = {
     },
 
     setupLevel() {
-        this.blocks = [];
-        // Phase 1: hand-placed ~20 blocks for testing
-        const startY = this.canvas.height * 0.65;
-        let x = 50;
-
-        // Starting platform (wider)
-        this.blocks.push(new Block(x, startY, 120, 30));
-
-        x += 170;
-        for (let i = 0; i < 19; i++) {
-            const width = 60 + Math.random() * 60;
-            const gap = 40 + Math.random() * 80;
-            const heightOffset = (Math.random() - 0.5) * 80;
-            const y = Math.max(200, Math.min(startY + heightOffset, this.canvas.height - 100));
-
-            this.blocks.push(new Block(x, y, width, 30));
-            x += width + gap;
-        }
+        this.blocks = Level.generate(this.canvas.height);
+        this.lastCheckpointBlock = null;
 
         // Player starts on first block
         const firstBlock = this.blocks[0];
@@ -59,6 +44,7 @@ const Game = {
     startGame() {
         this.state = 'playing';
         this.setupLevel();
+        this.cameraX = 0;
     },
 
     loop(timestamp) {
@@ -97,10 +83,47 @@ const Game = {
             this.deadTimer = 0.8;
         }
 
+        // Check checkpoint touches
+        this.checkCheckpoints();
+
         // Camera follows player horizontally with lookahead
         const targetCameraX = this.player.x - this.canvas.width * 0.35;
         this.cameraX += (targetCameraX - this.cameraX) * 0.08;
         if (this.cameraX < 0) this.cameraX = 0;
+    },
+
+    checkCheckpoints() {
+        for (const block of this.blocks) {
+            if (!block.checkpoint) continue;
+            if (block === this.lastCheckpointBlock) continue;
+
+            // Check if player is standing on this block
+            const onBlock = (
+                this.player.onGround &&
+                this.player.x + this.player.width > block.x &&
+                this.player.x < block.x + block.width &&
+                Math.abs((this.player.y + this.player.height) - block.y) < 4
+            );
+
+            if (onBlock) {
+                this.lastCheckpointBlock = block;
+                this.player.setSpawn(block.x + 20, block.y - 40);
+            }
+        }
+    },
+
+    // Returns the highest block index the player has reached
+    getPlayerProgress() {
+        let best = 0;
+        for (const block of this.blocks) {
+            if (!block.active) continue;
+            // Check horizontal overlap with player (generous range)
+            if (this.player.x + this.player.width > block.x &&
+                this.player.x < block.x + block.width + 80) {
+                if (block.blockIndex > best) best = block.blockIndex;
+            }
+        }
+        return best + 1; // 1-indexed for display
     },
 
     render() {
@@ -164,7 +187,6 @@ const Game = {
         ctx.closePath();
         ctx.fill();
 
-        // Closer mountain range
         ctx.fillStyle = 'rgba(80, 110, 150, 0.2)';
         const parallax2 = this.cameraX * 0.15;
         ctx.beginPath();
@@ -180,7 +202,6 @@ const Game = {
     },
 
     drawStartScreen(ctx, w, h) {
-        // Title
         ctx.fillStyle = '#FFF';
         ctx.font = 'bold 48px Arial, sans-serif';
         ctx.textAlign = 'center';
@@ -188,39 +209,102 @@ const Game = {
         ctx.shadowBlur = 10;
         ctx.fillText('PARKOUR VOID RUNNER', w / 2, h * 0.35);
 
-        // Subtitle
         ctx.font = '20px Arial, sans-serif';
         ctx.fillStyle = 'rgba(255,255,255,0.8)';
-        ctx.fillText('Navigate the floating blocks. Don\'t fall into the void.', w / 2, h * 0.42);
+        ctx.fillText('Navigate 200 floating blocks. Don\'t fall into the void.', w / 2, h * 0.42);
 
-        // Start prompt (pulsing)
         const pulse = 0.6 + Math.sin(performance.now() * 0.004) * 0.4;
         ctx.fillStyle = `rgba(255, 255, 255, ${pulse})`;
         ctx.font = 'bold 24px Arial, sans-serif';
         ctx.fillText('Press SPACE or ENTER to Start', w / 2, h * 0.55);
 
-        // Controls
         ctx.font = '16px Arial, sans-serif';
         ctx.fillStyle = 'rgba(255,255,255,0.6)';
         ctx.fillText('Arrow Keys / WASD to move  •  UP / SPACE to jump', w / 2, h * 0.65);
 
         ctx.shadowBlur = 0;
+        ctx.textAlign = 'left';
     },
 
     drawHUD(ctx, w) {
-        ctx.fillStyle = 'rgba(0,0,0,0.4)';
-        ctx.fillRect(0, 0, w, 40);
+        // Top bar background
+        ctx.fillStyle = 'rgba(0,0,0,0.45)';
+        ctx.fillRect(0, 0, w, 44);
+
+        ctx.shadowBlur = 0;
+        ctx.textAlign = 'left';
+
+        // Progress: Block X / 200
+        const progress = this.state === 'playing' ? this.getPlayerProgress() : 1;
+        const total = Level.TOTAL_BLOCKS;
 
         ctx.fillStyle = '#FFF';
         ctx.font = 'bold 16px Arial, sans-serif';
-        ctx.textAlign = 'left';
-        ctx.fillText('Phase 1 — Test Level', 15, 26);
+        ctx.fillText(`Block  ${progress} / ${total}`, 15, 28);
 
+        // Progress bar
+        const barX = 160;
+        const barW = Math.min(w - 340, 400);
+        const barH = 10;
+        const barY = 17;
+        const fill = progress / total;
+
+        ctx.fillStyle = 'rgba(255,255,255,0.15)';
+        ctx.beginPath();
+        ctx.roundRect(barX, barY, barW, barH, 5);
+        ctx.fill();
+
+        ctx.fillStyle = '#4CAF50';
+        ctx.beginPath();
+        ctx.roundRect(barX, barY, barW * fill, barH, 5);
+        ctx.fill();
+
+        // Checkpoint indicator on the right
+        const checkpointNums = [1, 2, 3, 4];
+        const checkpointBlocks = Level.CHECKPOINT_INDICES;
+        ctx.font = '13px Arial, sans-serif';
+        ctx.textAlign = 'right';
+
+        let checkpointsReached = 0;
+        if (this.lastCheckpointBlock) {
+            checkpointsReached = checkpointBlocks.filter(
+                idx => idx <= this.lastCheckpointBlock.blockIndex
+            ).length;
+        }
+
+        ctx.fillStyle = 'rgba(255,255,255,0.5)';
+        ctx.fillText('Checkpoints:', w - 110, 22);
+
+        for (let i = 0; i < 4; i++) {
+            const cx = w - 95 + i * 22;
+            const cy = 22;
+            ctx.beginPath();
+            ctx.arc(cx, cy - 5, 7, 0, Math.PI * 2);
+            ctx.fillStyle = i < checkpointsReached ? '#FF5722' : 'rgba(255,255,255,0.2)';
+            ctx.fill();
+            ctx.strokeStyle = i < checkpointsReached ? '#FF8A65' : 'rgba(255,255,255,0.3)';
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+        }
+
+        ctx.textAlign = 'left';
+
+        // Death message
         if (this.state === 'dead') {
             ctx.textAlign = 'center';
             ctx.font = 'bold 20px Arial, sans-serif';
             ctx.fillStyle = '#FF5722';
-            ctx.fillText('FELL INTO THE VOID!', this.canvas.width / 2, this.canvas.height / 2);
+            ctx.shadowColor = 'rgba(0,0,0,0.5)';
+            ctx.shadowBlur = 8;
+            const respawnMsg = this.lastCheckpointBlock
+                ? 'Respawning at checkpoint...'
+                : 'Respawning at start...';
+            ctx.fillText('FELL INTO THE VOID!', this.canvas.width / 2, this.canvas.height / 2 - 16);
+            ctx.font = '16px Arial, sans-serif';
+            ctx.fillStyle = 'rgba(255,255,255,0.8)';
+            ctx.fillText(respawnMsg, this.canvas.width / 2, this.canvas.height / 2 + 12);
+            ctx.shadowBlur = 0;
+            ctx.textAlign = 'left';
         }
     },
 };
