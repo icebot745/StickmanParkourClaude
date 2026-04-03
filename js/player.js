@@ -87,11 +87,12 @@ class Player {
 
         // Jump
         if (Input.jump && this.onGround) {
+            const jumpMult = (typeof Game !== 'undefined' && Game.jumperTimer > 0) ? 2 : 1;
             if (this.standingBlock && this.standingBlock.type === BlockType.SLIME) {
-                this.vy = this.jumpForce * 1.6;
+                this.vy = this.jumpForce * 1.6 * jumpMult;
                 Sound.slimeBounce();
             } else {
-                this.vy = this.jumpForce;
+                this.vy = this.jumpForce * jumpMult;
                 Sound.jump();
             }
             this.onGround = false;
@@ -113,17 +114,25 @@ class Player {
 
         // Landing detection — fire sound + dust on first ground contact
         if (!wasOnGround && this.onGround) {
-            Sound.land();
+            // Pick sound based on surface type
+            if (this.standingBlock && this.standingBlock.type === BlockType.CONVEYOR) {
+                Sound.conveyor();
+            } else if (this.standingBlock && this.standingBlock.type === BlockType.MOVING) {
+                Sound.movingLand();
+            } else {
+                Sound.land();
+            }
             Particles.land(this.x + this.width / 2, this.y + this.height);
         }
 
         // Conveyor belt push after all collision resolution
-        if (this.onGround && this.standingBlock && this.standingBlock.type === BlockType.CONVEYOR) {
+        const _neutralize = typeof Game !== 'undefined' && Game.neutralizeTimer > 0;
+        if (!_neutralize && this.onGround && this.standingBlock && this.standingBlock.type === BlockType.CONVEYOR) {
             this.x += this.standingBlock.direction * this.standingBlock.conveyorSpeed * dt;
         }
 
         // Moving platform carry — player rides with the block
-        if (this.onGround && this.standingBlock && this.standingBlock.type === BlockType.MOVING) {
+        if (!_neutralize && this.onGround && this.standingBlock && this.standingBlock.type === BlockType.MOVING) {
             this.x += this.standingBlock.dx;
         }
 
@@ -150,11 +159,12 @@ class Player {
     }
 
     resolveCollisionsX(blocks) {
+        const _neut = typeof Game !== 'undefined' && Game.neutralizeTimer > 0;
         for (const block of blocks) {
             if (!block.active) continue;
             if (this.overlaps(block)) {
                 // MAGMA side collision: launch forward
-                if (block.type === BlockType.MAGMA && this.knockbackTimer <= 0) {
+                if (!_neut && block.type === BlockType.MAGMA && this.knockbackTimer <= 0) {
                     this.vx = this.facing * 700;
                     this.vy = -250;
                     this.knockbackTimer = 0.6;
@@ -181,6 +191,7 @@ class Player {
     }
 
     resolveCollisionsY(blocks) {
+        const _neut = typeof Game !== 'undefined' && Game.neutralizeTimer > 0;
         for (const block of blocks) {
             if (!block.active) continue;
             if (this.overlaps(block)) {
@@ -188,7 +199,7 @@ class Player {
                     // Landing on top of block
                     this.standingBlock = block;
 
-                    if (block.type === BlockType.MAGMA && this.knockbackTimer <= 0) {
+                    if (!_neut && block.type === BlockType.MAGMA && this.knockbackTimer <= 0) {
                         // Magma top: launch forward — place player above block first
                         // so the normal resolver doesn't see an overlap and cancel the velocity
                         this.y = block.y - this.height - 1;
@@ -201,7 +212,7 @@ class Player {
                         continue;
                     }
 
-                    if (block.type === BlockType.BOUNCE) {
+                    if (!_neut && block.type === BlockType.BOUNCE) {
                         // Bounce pad: launch straight up with high force
                         this.y = block.y - this.height;
                         this.vy = -950;
@@ -217,8 +228,9 @@ class Player {
                     this.onGround = true;
 
                     // Trigger disappearing block on land
-                    if (block.type === BlockType.DISAPPEARING) {
+                    if (!_neut && block.type === BlockType.DISAPPEARING) {
                         block.triggerDisappear();
+                        Sound.disappearWarn();
                     }
 
                 } else if (this.vy < 0) {
@@ -261,6 +273,15 @@ class Player {
         const screenX = this.x - cameraX + this.width / 2;
         const screenY = this.y;
 
+        // Resolve equipped colour from PlayerData
+        let drawColor = '#FFF';
+        const equipped = (typeof PlayerData !== 'undefined') ? PlayerData.getEquipped() : {};
+        if (equipped.color) {
+            const cosm = PlayerData.COSMETICS.find(c => c.id === equipped.color);
+            if (cosm) drawColor = cosm.color;
+        }
+        this._drawColor = drawColor;
+
         // Cyan glow effect when rolling
         if (this.rollTimer > 0) {
             const glowPulse = 0.65 + Math.sin(performance.now() * 0.009) * 0.35;
@@ -288,6 +309,11 @@ class Player {
                 this.drawIdle(ctx);
         }
 
+        // Draw accessories on top of stickman
+        if (this.state !== 'rolling') {
+            this.drawAccessories(ctx, equipped);
+        }
+
         ctx.restore();
 
         // Reset shadow after drawing
@@ -295,8 +321,91 @@ class Player {
         ctx.shadowColor = 'transparent';
     }
 
+    drawAccessories(ctx, equipped) {
+        if (!equipped) return;
+        ctx.shadowBlur = 0;
+
+        // ── Hat ───────────────────────────────────────────────────────────────
+        if (equipped.hat === 'hat_party') {
+            // Colourful party hat (pointy cone on head)
+            ctx.save();
+            const grad = ctx.createLinearGradient(-6, -10, 6, 2);
+            grad.addColorStop(0, '#FF5252'); grad.addColorStop(0.5, '#FFEB3B'); grad.addColorStop(1, '#7C4DFF');
+            ctx.fillStyle = grad;
+            ctx.beginPath();
+            ctx.moveTo(-7, 3); ctx.lineTo(7, 3); ctx.lineTo(0, -12);
+            ctx.closePath(); ctx.fill();
+            // Pompom
+            ctx.fillStyle = '#FFF';
+            ctx.beginPath(); ctx.arc(0, -12, 3, 0, Math.PI * 2); ctx.fill();
+            ctx.restore();
+
+        } else if (equipped.hat === 'hat_top') {
+            // Top hat
+            ctx.fillStyle = '#212121';
+            // Brim
+            ctx.fillRect(-9, 1, 18, 3);
+            // Crown
+            ctx.fillRect(-6, -9, 12, 11);
+            // Band
+            ctx.fillStyle = '#795548';
+            ctx.fillRect(-6, -1, 12, 2);
+
+        } else if (equipped.hat === 'hat_crown') {
+            // Gold crown
+            ctx.fillStyle = '#FFD700';
+            ctx.beginPath();
+            ctx.moveTo(-8, 3); ctx.lineTo(-8, -4); ctx.lineTo(-4, -1);
+            ctx.lineTo(0, -8); ctx.lineTo(4, -1); ctx.lineTo(8, -4); ctx.lineTo(8, 3);
+            ctx.closePath(); ctx.fill();
+            // Jewels
+            ctx.fillStyle = '#F44336'; ctx.beginPath(); ctx.arc(0, -2, 2, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = '#2196F3'; ctx.beginPath(); ctx.arc(-5, 0, 1.5, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = '#4CAF50'; ctx.beginPath(); ctx.arc(5, 0, 1.5, 0, Math.PI * 2); ctx.fill();
+        }
+
+        // ── Glasses ───────────────────────────────────────────────────────────
+        if (equipped.glasses === 'glasses') {
+            ctx.fillStyle = 'rgba(0,0,0,0.75)';
+            ctx.beginPath(); ctx.ellipse(-4, 9, 4, 3, 0, 0, Math.PI * 2); ctx.fill();
+            ctx.beginPath(); ctx.ellipse(4, 9, 4, 3, 0, 0, Math.PI * 2); ctx.fill();
+            // Bridge
+            ctx.strokeStyle = '#111'; ctx.lineWidth = 1;
+            ctx.beginPath(); ctx.moveTo(0, 9); ctx.lineTo(0, 9); ctx.stroke();
+            // Arms
+            ctx.beginPath(); ctx.moveTo(-8, 9); ctx.lineTo(-10, 8); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(8, 9); ctx.lineTo(10, 8); ctx.stroke();
+            // Lens tint
+            ctx.fillStyle = 'rgba(0,150,255,0.25)';
+            ctx.beginPath(); ctx.ellipse(-4, 9, 4, 3, 0, 0, Math.PI * 2); ctx.fill();
+            ctx.beginPath(); ctx.ellipse(4, 9, 4, 3, 0, 0, Math.PI * 2); ctx.fill();
+        }
+
+        // ── Cape ──────────────────────────────────────────────────────────────
+        if (equipped.cape === 'cape') {
+            const cf = this.facing || 1;
+            ctx.fillStyle = '#B71C1C';
+            ctx.beginPath();
+            ctx.moveTo(-cf * 3, 14);
+            ctx.lineTo(-cf * 14, 28);
+            ctx.lineTo(-cf * 10, 38);
+            ctx.lineTo(-cf * 2, 28);
+            ctx.closePath();
+            ctx.fill();
+            // Cape highlight
+            ctx.fillStyle = 'rgba(255,255,255,0.12)';
+            ctx.beginPath();
+            ctx.moveTo(-cf * 3, 14);
+            ctx.lineTo(-cf * 10, 24);
+            ctx.lineTo(-cf * 8, 28);
+            ctx.lineTo(-cf * 2, 28);
+            ctx.closePath();
+            ctx.fill();
+        }
+    }
+
     drawIdle(ctx) {
-        ctx.strokeStyle = '#FFF';
+        ctx.strokeStyle = this._drawColor || '#FFF';
         ctx.lineWidth = 2.5;
         ctx.lineCap = 'round';
 
@@ -330,7 +439,7 @@ class Player {
 
     drawRunning(ctx) {
         const cycle = Math.sin(this.animTime * 12) * this.facing;
-        ctx.strokeStyle = '#FFF';
+        ctx.strokeStyle = this._drawColor || '#FFF';
         ctx.lineWidth = 2.5;
         ctx.lineCap = 'round';
 
@@ -365,7 +474,7 @@ class Player {
     }
 
     drawJumping(ctx) {
-        ctx.strokeStyle = '#FFF';
+        ctx.strokeStyle = this._drawColor || '#FFF';
         ctx.lineWidth = 2.5;
         ctx.lineCap = 'round';
 
@@ -398,7 +507,7 @@ class Player {
     }
 
     drawFalling(ctx) {
-        ctx.strokeStyle = '#FFF';
+        ctx.strokeStyle = this._drawColor || '#FFF';
         ctx.lineWidth = 2.5;
         ctx.lineCap = 'round';
 
@@ -437,7 +546,7 @@ class Player {
         ctx.translate(0, 20); // shift down to crouched position
         ctx.rotate(spin);
 
-        ctx.strokeStyle = '#FFF';
+        ctx.strokeStyle = this._drawColor || '#FFF';
         ctx.lineWidth = 2.5;
         ctx.lineCap = 'round';
 

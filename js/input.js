@@ -12,7 +12,8 @@ const Input = {
 
     init() {
         window.addEventListener('keydown', (e) => {
-            if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', ' '].includes(e.key)) {
+            if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', ' ',
+                 '1', '2', '3', '4', '5'].includes(e.key)) {
                 e.preventDefault();
             }
             if (!this.keys[e.key]) {

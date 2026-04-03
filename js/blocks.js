@@ -57,6 +57,7 @@ class Block {
                     this.blockState = 'reappearing';
                     this.reappearTimer = 0.7;
                     this.active = true;
+                    Sound.disappearReappear();
                 }
             } else if (this.blockState === 'reappearing') {
                 this.reappearTimer -= dt;

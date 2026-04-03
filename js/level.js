@@ -33,7 +33,6 @@ const Level = {
 
         // Build a pool of exactly 15 of each special type, 10 moving, rest dirt
         const typePool = [];
-        for (let i = 0; i < 15; i++) typePool.push(BlockType.SLIME);
         for (let i = 0; i < 15; i++) typePool.push(BlockType.DISAPPEARING);
         for (let i = 0; i < 15; i++) typePool.push(BlockType.CONVEYOR);
         for (let i = 0; i < 15; i++) typePool.push(BlockType.MAGMA);
