@@ -73,9 +73,14 @@ class Block {
         }
 
         if (this.type === BlockType.MOVING) {
-            const prevX = this.x;
-            this.x = this.startX + Math.sin(performance.now() * 0.001 * this.moveSpeed + this.movePhase) * this.moveRange;
+            const prevX  = this.x;
+            const prevDx = this.dx;
+            this.x  = this.startX + Math.sin(performance.now() * 0.001 * this.moveSpeed + this.movePhase) * this.moveRange;
             this.dx = this.x - prevX;
+            // Play a thunk when the platform reverses direction
+            if (prevDx !== 0 && Math.sign(this.dx) !== Math.sign(prevDx)) {
+                Sound.movingBlock();
+            }
         }
     }
 

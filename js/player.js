@@ -217,7 +217,7 @@ class Player {
                         this.y = block.y - this.height;
                         this.vy = -950;
                         this.onGround = false;
-                        Sound.slimeBounce();
+                        Sound.bounceSplash();
                         Particles.bounce(this.x + this.width / 2, block.y);
                         continue;
                     }

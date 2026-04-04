@@ -54,6 +54,14 @@ const Sound = (() => {
         land()             { sweep(180,  90, 'sine',     0.09, 0.18); },
         roll()             { sweep(380, 760, 'sawtooth', 0.18, 0.07); },
         slimeBounce()      { sweep(180, 480, 'sine',     0.15, 0.22); },
+
+        bounceSplash() {
+            // Juicy upward splash: main sploosh + three quick droplet tones
+            sweep(300, 900, 'sine', 0.18, 0.28);
+            tone(1200, 'sine', 0.08, 0.08, 0.02);
+            tone(900,  'sine', 0.07, 0.07, 0.06);
+            tone(650,  'sine', 0.06, 0.06, 0.11);
+        },
         magma()            { sweep(750, 180, 'sawtooth', 0.28, 0.30); },
 
         death() {
@@ -97,7 +105,15 @@ const Sound = (() => {
         },
 
         movingLand() {
-            sweep(200, 100, 'sine', 0.10, 0.16);
+            // Deep boom when landing on a moving platform
+            sweep(180,  28, 'sine',     0.28, 0.45);
+            sweep(140,  22, 'triangle', 0.20, 0.38, 0.02);
+            tone(80,       'sine',     0.18, 0.30, 0.05);
+        },
+
+        movingBlock() {
+            // Boop when the platform reverses direction
+            sweep(420, 340, 'sine', 0.12, 0.20);
         },
 
         setSfxEnabled(v) { _sfxEnabled = v; },
